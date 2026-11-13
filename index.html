@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat</title>
+</head>
+<body>
+  <div id="who"></div>
+
+  <input id="me" placeholder="Your name">
+  <button onclick="setname()">Set Name</button>
+
+  <input id="channel" placeholder="Channel name">
+  <button onclick="addChannel()">Join channel</button>
+  <div id="current"></div>
+
+  <div id="log"></div>
+
+  <input id="msg" placeholder="Type a message">
+  <button onclick="send()">Send</button>
+
+  <script>
+    const DEFAULT_CHANNEL = 'meetup:112';
+    let currentChannel = null;
+
+    const ws = new WebSocket('ws://localhost:8080');
+
+    function $(sel) { return document.querySelector(sel); }
+
+    function sendMessage(data) {
+      if (ws.readyState !== WebSocket.OPEN) {
+        console.warn('Socket not open');
+        return;
+      }
+      ws.send(JSON.stringify(data));
+    }
+
+    function appendLine(text) {
+      const d = document.createElement('div');
+      d.textContent = text;               // textContent: no HTML injection
+      $('#log').appendChild(d);
+    }
+
+    function setname() {
+      const name = $('#me').value.trim() || 'Anonymous';
+      localStorage.setItem('myName', name);
+      $('#who').textContent = 'Logged in as: ' + name;
+      sendMessage({ operation: 'setName', name });
+    }
+
+    function joinChannel(channelName) {
+      if (channelName === currentChannel) return;
+      if (currentChannel) {
+        sendMessage({ operation: 'unsubscribeChannel', channelName: currentChannel });
+      }
+      sendMessage({ operation: 'subscribeChannel', channelName });
+      currentChannel = channelName;
+      $('#current').textContent = 'Channel: ' + channelName;
+      appendLine('Joined ' + channelName);
+      cogitnsole.log('Joined channel', channelName);
+    }
+
+    function addChannel() {
+      const name = $('#channel').value.trim();
+      if (!name) return;
+      joinChannel(name);
+      $('#channel').value = '';
+    }
+
+    function send() {
+      const input = $('#msg');
+      const text = input.value.trim();
+      if (!text || !currentChannel) return;
+      sendMessage({ operation: 'PublishMessage', channelName: currentChannel, text });
+      input.value = '';                   // no local echo: the server sends it back
+    }
+
+    $('#msg').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') send();
+    });
+
+    ws.onopen = () => {
+      const name = localStorage.getItem('myName') || 'Anonymous';
+      $('#me').value = name === 'Anonymous' ? '' : name;
+      $('#who').textContent = 'Logged in as: ' + name;
+      sendMessage({ operation: 'setName', name });
+      joinChannel(DEFAULT_CHANNEL);
+    };
+
+    ws.onmessage = (event) => {
+      let data;
+      try { data = JSON.parse(event.data); } catch { return; }
+      if (data.type === 'message' && data.channel === currentChannel) {
+        appendLine(`${data.from}: ${data.text}`);
+      }
+    };
+
+    ws.onclose = () => appendLine('Disconnected from server');
+    ws.onerror = (e) => console.error('WebSocket error', e);
+  </script>
+</body>
+</html>
